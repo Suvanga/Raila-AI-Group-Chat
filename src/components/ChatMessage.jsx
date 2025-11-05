@@ -4,9 +4,18 @@ import { auth } from '../firebase-config.js';
 function ChatMessage(props) {
   const { text, uid, photoURL, email } = props.message;
 
-  // Check if the message was sent by the currently logged-in user
-  const messageClass = uid === auth.currentUser.uid ? 'sent' : 'received';
-  const displayName = email.split('@')[0];
+  // --- THIS IS THE UPDATED LOGIC ---
+  // It now checks for the AI bot, 'sent' messages, or 'received' messages
+  let messageClass = '';
+  if (uid === 'RailaAI') {
+    messageClass = 'ai';
+  } else if (uid === auth.currentUser.uid) {
+    messageClass = 'sent';
+  } else {
+    messageClass = 'received';
+  }
+  
+  const displayName = email ? email.split('@')[0] : 'User';
   
   // Use a default avatar if photoURL is missing (DiceBear is a great placeholder)
   const avatar = photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`;
