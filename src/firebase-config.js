@@ -1,8 +1,12 @@
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
+
+// --- IMPORT THE SERVICES YOU NEED ---
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
+// (This is the object you copied from the Firebase console)
 const firebaseConfig = {
   apiKey: "AIzaSyASVyopoBJWuIzZPmmub0dPpfSzFFbXrWM",
   authDomain: "railaai.firebaseapp.com",
@@ -18,5 +22,5 @@ const app = initializeApp(firebaseConfig);
 
 // --- THIS IS THE FIX ---
 // We must explicitly tell getFirestore which database to use.
-export const db = getFirestore(app, "raila-chat-db"); // <-- ADDED "raila-chat-db"
+export const db = getFirestore(app, "raila-chat-db"); 
 export const auth = getAuth(app);

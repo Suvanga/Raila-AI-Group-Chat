@@ -1,16 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // <-- Import useEffect
 import { db, auth } from '../firebase-config.js';
 import { 
   collection, 
   query, 
   where, 
   getDocs,
-  limit
+  limit,
+  onSnapshot // <-- Import onSnapshot
 } from 'firebase/firestore';
 
-function Sidebar({ user, activeChat, setActiveChat }) {
+// Add setShowCreateGroupModal prop
+function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [groupChats, setGroupChats] = useState([]); // <-- State for our new groups
+
+  // --- NEW: Listen for group chats ---
+  useEffect(() => {
+    const chatsRef = collection(db, 'chats');
+    // Query for groups where the current user is a member
+    const q = query(chatsRef, where('members', 'array-contains', auth.currentUser.uid));
+
+    // onSnapshot listens for real-time updates
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const groups = [];
+      querySnapshot.forEach((doc) => {
+        // Only add group chats (isGroup: true), not 1-on-1 chats
+        if (doc.data().isGroup) {
+          groups.push({ id: doc.id, ...doc.data() });
+        }
+      });
+      setGroupChats(groups);
+    });
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
+  }, []); // Empty array means this runs once on component mount
 
   // --- Search for users in Firestore ---
   const handleSearch = async (e) => {
@@ -25,44 +50,40 @@ function Sidebar({ user, activeChat, setActiveChat }) {
     const q = query(
       usersRef,
       where('displayName', '>=', searchTerm),
-      where('displayName', '<=', searchTerm + '\uf8ff'),
+      where('displayName', '<=', searchTerm + '\uf8ff'), // '\uf8ff' is a magic char for 'starts-with' queries
       limit(10)
     );
 
-    try {
-      const querySnapshot = await getDocs(q);
-      const users = [];
-      
-      // --- THIS IS THE BUG FIX ---
-      // We get the current user's ID *before* the loop
-      const myUid = auth.currentUser.uid; 
-
-      querySnapshot.forEach((doc) => {
-        // Only add users who are NOT the current user
-        if (doc.id !== myUid) { 
-          users.push({ id: doc.id, ...doc.data() });
-        }
-      });
-      setSearchResults(users);
-    } catch (error) {
-      console.error("Error searching users: ", error);
-    }
+    const querySnapshot = await getDocs(q);
+    const users = [];
+    querySnapshot.forEach((doc) => {
+      // Don't show the current user in the search results
+      if (doc.id !== auth.currentUser.uid) {
+        users.push({ uid: doc.id, ...doc.data() });
+      }
+    });
+    setSearchResults(users);
   };
 
-  // --- Start a private 1-on-1 chat ---
-  const startPrivateChat = (friend) => {
-    // Create a unique chat ID by combining both user IDs, sorted
-    const myUid = auth.currentUser.uid;
-    const theirUid = friend.id;
-    const chatId = [myUid, theirUid].sort().join('_');
+  // --- Start a new 1-on-1 chat ---
+  const handleStartPrivateChat = (friend) => {
+    // Create a unique chat ID by combining user IDs
+    // This ensures that any 1-on-1 chat only has one room
+    const currentUserId = auth.currentUser.uid;
+    const friendId = friend.uid;
+    
+    // Sort IDs to ensure consistency (user1_user2 is the same as user2_user1)
+    const chatId = currentUserId > friendId 
+      ? `${currentUserId}_${friendId}` 
+      : `${friendId}_${currentUserId}`;
 
-    // Set this as the active chat in App.jsx
+    // Set this new chat as the active one
     setActiveChat({
       id: chatId,
       name: friend.displayName
     });
-    
-    // Clear search
+
+    // Clear search results
     setSearchTerm('');
     setSearchResults([]);
   };
@@ -74,56 +95,73 @@ function Sidebar({ user, activeChat, setActiveChat }) {
         <h1>Raila AI <span>Chat</span></h1>
       </div>
 
-      {/* --- Public Chat Room --- */}
+      {/* --- CHAT ROOMS SECTION --- */}
       <div className="sidebar-menu-section">
-        <p className="menu-title">Chat Rooms</p>
+        <div className="menu-title-header">
+          <p className="menu-title">Chat Rooms</p>
+          <button className="add-group-btn" title="Create Group" onClick={() => setShowCreateGroupModal(true)}>
+            +
+          </button>
+        </div>
+        
+        {/* Public Chat Button */}
         <button 
           className={`menu-item ${activeChat.id === 'public' ? 'active' : ''}`}
-          onClick={() => setActiveChat({ id: 'public', name: 'Raila AI Group Chat' })}
+          onClick={() => setActiveChat({ id: 'public', name: 'Public Chat' })}
         >
-          #  Public Chat
+          # Public Chat
         </button>
+
+        {/* --- List of Group Chats --- */}
+        {groupChats.map(group => (
+          <button
+            key={group.id}
+            className={`menu-item ${activeChat.id === group.id ? 'active' : ''}`}
+            onClick={() => setActiveChat({ id: group.id, name: group.groupName })}
+          >
+            # {group.groupName}
+          </button>
+        ))}
       </div>
 
-      {/* --- AI Bot Section (Future) --- */}
+      {/* --- AI MODELS SECTION (Coming Soon) --- */}
       <div className="sidebar-menu-section">
         <p className="menu-title">AI Models</p>
-        <button className="menu-item">(Coming Soon)</button>
+        <div className="menu-item-disabled">(Coming Soon)</div>
       </div>
 
-      {/* --- Friends/User Search Section --- */}
+      {/* --- FRIENDS (USER SEARCH) SECTION --- */}
       <div className="sidebar-menu-section">
         <p className="menu-title">Friends</p>
-        <form className="search-bar" onSubmit={handleSearch}>
-          <input 
-            type="text" 
-            placeholder="Search by display name..." 
+        <form className="search-form" onSubmit={handleSearch}>
+          <input
+            type="text"
+            placeholder="Search by display name..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </form>
 
-        {/* --- Search Results List --- */}
-        <div className="user-list">
+        {/* --- Search Results --- */}
+        <div className="search-results">
           {searchResults.map(friend => (
             <button 
-              key={friend.id} 
-              className="user-list-item"
-              onClick={() => startPrivateChat(friend)}
+              key={friend.uid} 
+              className="user-search-item"
+              onClick={() => handleStartPrivateChat(friend)}
             >
-              <img src={friend.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${friend.email}`} alt={friend.displayName} />
+              <img src={friend.photoURL} alt={friend.displayName} />
               <span>{friend.displayName}</span>
             </button>
           ))}
         </div>
       </div>
-
-      {/* --- User Profile Footer --- */}
-      <div className="sidebar-footer">
-        <img src={user.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${user.email}`} alt="Your Avatar" />
-        <span>{user.displayName || user.email.split('@')[0]}</span>
+      
+      {/* --- User Profile Section --- */}
+      <div className="sidebar-user-info">
+        <img src={user.photoURL} alt="Your avatar" />
+        <span>{user.displayName}</span>
       </div>
-
     </nav>
   );
 }
