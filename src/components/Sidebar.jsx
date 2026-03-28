@@ -1,43 +1,36 @@
-import React, { useState, useEffect } from 'react'; // <-- Import useEffect
+import React, { useState, useMemo } from 'react';
 import { db, auth } from '../firebase-config.js';
 import { 
   collection, 
   query, 
   where, 
   getDocs,
+  getDoc,
+  doc,
+  setDoc,
   limit,
-  onSnapshot // <-- Import onSnapshot
+  serverTimestamp,
 } from 'firebase/firestore';
+import { useChatList } from '../hooks/useChatList.js';
+import { useUnread } from '../hooks/useUnread.js';
 
-// Add setShowCreateGroupModal prop
 function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isOpen }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
-  const [groupChats, setGroupChats] = useState([]); // <-- State for our new groups
 
-  // --- NEW: Listen for group chats ---
-  useEffect(() => {
-    const chatsRef = collection(db, 'chats');
-    // Query for groups where the current user is a member
-    const q = query(chatsRef, where('members', 'array-contains', auth.currentUser.uid));
+  const { groupChats, dmChats } = useChatList();
 
-    // onSnapshot listens for real-time updates
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const groups = [];
-      querySnapshot.forEach((doc) => {
-        // Only add group chats (isGroup: true), not 1-on-1 chats
-        if (doc.data().isGroup) {
-          groups.push({ id: doc.id, ...doc.data() });
-        }
-      });
-      setGroupChats(groups);
-    });
+  // Build a flat list of all chat IDs for unread tracking
+  const allChatIds = useMemo(() => {
+    const ids = ['public'];
+    groupChats.forEach((g) => ids.push(g.id));
+    dmChats.forEach((d) => ids.push(d.id));
+    return ids;
+  }, [groupChats, dmChats]);
 
-    // Cleanup listener on unmount
-    return () => unsubscribe();
-  }, []); // Empty array means this runs once on component mount
+  const { unreadCounts, markAsRead } = useUnread(allChatIds, activeChat.id);
 
-  // --- Search for users in Firestore ---
+  // Search for users in Firestore
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchTerm.trim()) {
@@ -46,44 +39,56 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
     }
 
     const usersRef = collection(db, 'users');
-    // Create a query to find users whose display name starts with the search term
     const q = query(
       usersRef,
       where('displayName', '>=', searchTerm),
-      where('displayName', '<=', searchTerm + '\uf8ff'), // '\uf8ff' is a magic char for 'starts-with' queries
+      where('displayName', '<=', searchTerm + '\uf8ff'),
       limit(10)
     );
 
     const querySnapshot = await getDocs(q);
     const users = [];
-    querySnapshot.forEach((doc) => {
-      // Don't show the current user in the search results
-      if (doc.id !== auth.currentUser.uid) {
-        users.push({ uid: doc.id, ...doc.data() });
+    querySnapshot.forEach((docSnap) => {
+      if (docSnap.id !== auth.currentUser.uid) {
+        users.push({ uid: docSnap.id, ...docSnap.data() });
       }
     });
     setSearchResults(users);
   };
 
-  // --- Start a new 1-on-1 chat ---
-  const handleStartPrivateChat = (friend) => {
-    // Create a unique chat ID by combining user IDs
-    // This ensures that any 1-on-1 chat only has one room
+  // Start or open a 1-on-1 DM — persists the chat doc in Firestore
+  const handleStartPrivateChat = async (friend) => {
     const currentUserId = auth.currentUser.uid;
     const friendId = friend.uid;
     
-    // Sort IDs to ensure consistency (user1_user2 is the same as user2_user1)
+    // Deterministic chat ID so the same pair always maps to the same doc
     const chatId = currentUserId > friendId 
       ? `${currentUserId}_${friendId}` 
       : `${friendId}_${currentUserId}`;
 
-    // Set this new chat as the active one
+    // Create the DM doc in Firestore if it doesn't exist yet
+    const chatDocRef = doc(db, 'chats', chatId);
+    const chatDocSnap = await getDoc(chatDocRef);
+
+    if (!chatDocSnap.exists()) {
+      const { uid, displayName, photoURL } = auth.currentUser;
+      await setDoc(chatDocRef, {
+        isDM: true,
+        isGroup: false,
+        members: [currentUserId, friendId],
+        membersInfo: [
+          { uid, displayName, photoURL },
+          { uid: friend.uid, displayName: friend.displayName, photoURL: friend.photoURL },
+        ],
+        createdAt: serverTimestamp(),
+      });
+    }
+
     setActiveChat({
       id: chatId,
       name: friend.displayName
     });
 
-    // Clear search results
     setSearchTerm('');
     setSearchResults([]);
   };
@@ -109,7 +114,10 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
           className={`menu-item ${activeChat.id === 'public' ? 'active' : ''}`}
           onClick={() => setActiveChat({ id: 'public', name: 'Public Chat' })}
         >
-          # Public Chat
+          <span># Public Chat</span>
+          {unreadCounts['public'] > 0 && (
+            <span className="unread-badge">{unreadCounts['public']}</span>
+          )}
         </button>
 
         {/* --- List of Group Chats --- */}
@@ -119,20 +127,42 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
             className={`menu-item ${activeChat.id === group.id ? 'active' : ''}`}
             onClick={() => setActiveChat({ id: group.id, name: group.groupName })}
           >
-            # {group.groupName}
+            <span># {group.groupName}</span>
+            {unreadCounts[group.id] > 0 && (
+              <span className="unread-badge">{unreadCounts[group.id]}</span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* --- AI MODELS SECTION (Coming Soon) --- */}
+      {/* --- DIRECT MESSAGES SECTION --- */}
       <div className="sidebar-menu-section">
-        <p className="menu-title">AI Models</p>
-        <div className="menu-item-disabled">(Coming Soon)</div>
+        <p className="menu-title">Direct Messages</p>
+        {dmChats.length === 0 && (
+          <div className="menu-item-disabled">No conversations yet</div>
+        )}
+        {dmChats.map(dm => (
+          <button
+            key={dm.id}
+            className={`menu-item dm-item ${activeChat.id === dm.id ? 'active' : ''}`}
+            onClick={() => setActiveChat({ id: dm.id, name: dm.displayName })}
+          >
+            <img 
+              className="dm-avatar" 
+              src={dm.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${dm.displayName}`} 
+              alt={dm.displayName} 
+            />
+            <span className="dm-name">{dm.displayName}</span>
+            {unreadCounts[dm.id] > 0 && (
+              <span className="unread-badge">{unreadCounts[dm.id]}</span>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* --- FRIENDS (USER SEARCH) SECTION --- */}
       <div className="sidebar-menu-section">
-        <p className="menu-title">Friends</p>
+        <p className="menu-title">Find People</p>
         <form className="search-form" onSubmit={handleSearch}>
           <input
             type="text"

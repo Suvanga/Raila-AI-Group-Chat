@@ -1,150 +1,93 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { db, auth } from '../firebase-config.js';
+import React, { useState, useRef, useCallback } from 'react';
+import { db, auth, functions } from '../firebase-config.js';
 import {
   collection,
   addDoc,
   serverTimestamp,
-  query,
-  orderBy,
-  onSnapshot
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import ChatMessage from './ChatMessage.jsx';
-import Picker from 'emoji-picker-react'; // <-- Import the emoji picker
+import Picker from 'emoji-picker-react';
+import { useMessages } from '../hooks/useMessages.js';
+import { useTypingIndicator, useTypingUsers } from '../hooks/usePresence.js';
 
-// Import the AI props
 function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
-  const [messages, setMessages] = useState([]);
   const [formValue, setFormValue] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
-  const [showPicker, setShowPicker] = useState(false); // <-- State for the picker
-  const messagesEndRef = useRef(null);
-  
-  const messagesCollectionPath = chatId === 'public' 
-    ? 'messages' 
-    : `chats/${chatId}/messages`;
+  const [showPicker, setShowPicker] = useState(false);
+  const typingTimeoutRef = useRef(null);
 
-  // Listen for new messages (same as before)
-  useEffect(() => {
-    const messagesRef = collection(db, messagesCollectionPath);
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+  // Custom hooks
+  const { messages, loading, error, messagesEndRef, messagesCollectionPath } = useMessages(chatId);
+  const { setTyping } = useTypingIndicator(chatId);
+  const typingUsers = useTypingUsers(chatId);
 
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const msgs = [];
-      querySnapshot.forEach((doc) => {
-        msgs.push({ id: doc.id, ...doc.data() });
-      });
-      setMessages(msgs);
-    });
+  // Handle typing indicator debounce
+  const handleInputChange = useCallback((e) => {
+    setFormValue(e.target.value);
 
-    return () => unsubscribe();
-  }, [chatId, messagesCollectionPath]);
+    // Signal typing
+    setTyping(true);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => setTyping(false), 2000);
+  }, [setTyping]);
 
-  // Auto-scroll (same as before)
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // --- NEW: Add emoji to text input ---
   const onEmojiClick = (emojiObject) => {
     setFormValue(prevInput => prevInput + emojiObject.emoji);
-    setShowPicker(false); // Close picker after selection
+    setShowPicker(false);
   };
 
-  // --- NEW: Function to post AI message to Firestore ---
+  // Post AI message to Firestore
   const postAiMessage = async (text) => {
     const messagesRef = collection(db, messagesCollectionPath);
     await addDoc(messagesRef, {
       text: text,
       createdAt: serverTimestamp(),
-      uid: "RailaAI", // Special UID for the bot
+      uid: "RailaAI",
       email: "bot@raila.ai",
       photoURL: "https://api.dicebear.com/8.x/bottts/svg?seed=RailaAI"
     });
   };
 
-  // --- NEW: Function to call Gemini API ---
+  // Call AI via Firebase Cloud Function (API key stays server-side)
   const getAiResponse = async (userMessage) => {
     setIsAiTyping(true);
-    
-    // 1. Define the System Prompt based on user selections
-    let systemPrompt = "You are RailaAI, a helpful assistant in a group chat. ";
 
-    // Add Model instructions
-    switch(aiModel) {
-      case 'Trip Planner':
-        systemPrompt += "You are acting as a world-class trip planner. Give detailed itineraries, budget ideas, and hidden gems.";
-        break;
-      case 'Date Planner':
-        systemPrompt += "You are acting as a creative date planner. Suggest unique and fun date ideas, from simple to extravagant.";
-        break;
-      case 'Budgeting':
-        systemPrompt += "You are acting as a strict but helpful budgeting assistant. Give practical financial advice.";
-        break;
-      case 'Homework Help':
-        systemPrompt += "You are acting as a patient and encouraging homework helper. Explain concepts clearly and guide the user step by step.";
-        break;
-      default: // Generic
-        systemPrompt += "You are a general-purpose AI. Be helpful and concise.";
-    }
-
-    // Add Mode instructions
-    if (aiMode === 'Chada') {
-      systemPrompt += " Your personality is 'Chada'. You are very frank, open, sassy, and can use *mild* street-smart humor or roast the user lightly. Keep it PG-13 and never be truly offensive, but do be informal and blunt.";
-    } else { // Sushil
-      systemPrompt += " Your personality is 'Sushil'. You are extremely polite, formal, kind, and helpful to everyone. You are very nice.";
-    }
-
-    // 2. Set up the API call
-    const apiKey = ""; // API Key is handled by the environment
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-    const payload = {
-      contents: [{ parts: [{ text: userMessage }] }],
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-    };
-
-    // 3. Make the API call
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const generateAiResponse = httpsCallable(functions, 'generateAiResponse');
+      const result = await generateAiResponse({
+        message: userMessage,
+        aiModel: aiModel || 'Generic',
+        aiMode: aiMode || 'Sushil',
       });
 
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const result = await response.json();
-      const aiText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (aiText) {
-        await postAiMessage(aiText);
+      if (result.data?.text) {
+        await postAiMessage(result.data.text);
       } else {
         await postAiMessage("Sorry, I had trouble thinking of a response.");
       }
-
-    } catch (error) {
-      console.error("Gemini API Error:", error);
+    } catch (err) {
+      console.error("AI Cloud Function Error:", err);
       await postAiMessage("Sorry, I'm having connection issues. Please try again.");
     } finally {
       setIsAiTyping(false);
     }
   };
 
-  // --- UPDATED: Send Message ---
+  // Send Message
   const sendMessage = async (e) => {
     e.preventDefault();
-    const messageText = formValue; // Store text before clearing
+    const messageText = formValue;
     if (!messageText.trim()) return;
 
     const { uid, photoURL, email } = auth.currentUser;
     const messagesRef = collection(db, messagesCollectionPath);
 
+    // Clear typing indicator immediately
+    setTyping(false);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
     try {
-      // Post the user's message
       await addDoc(messagesRef, {
         text: messageText,
         createdAt: serverTimestamp(),
@@ -152,32 +95,59 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         email,
         photoURL: photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`
       });
-      setFormValue(''); // Clear the form
+      setFormValue('');
 
-      // --- NEW: Check if AI was mentioned ---
+      // Check if AI was mentioned
       if (messageText.toLowerCase().includes('@railaai')) {
-        // Call the AI in the background
         getAiResponse(messageText);
       }
-
-    } catch (error) {
-      console.error("Error sending message: ", error);
+    } catch (err) {
+      console.error("Error sending message:", err);
     }
+  };
+
+  // Build typing status text
+  const typingStatusText = () => {
+    if (typingUsers.length === 0) return null;
+    if (typingUsers.length === 1) return `${typingUsers[0].displayName} is typing...`;
+    if (typingUsers.length === 2) return `${typingUsers[0].displayName} and ${typingUsers[1].displayName} are typing...`;
+    return `${typingUsers[0].displayName} and ${typingUsers.length - 1} others are typing...`;
   };
 
   return (
     <main className="chat-room">
       {/* --- Chat Header --- */}
       <div className="chat-room-header">
-        {/* Display the active chat's name */}
         <h2>{chatName}</h2>
       </div>
 
       {/* --- Message List --- */}
       <div className="message-list">
+        {/* Loading state */}
+        {loading && (
+          <div className="chat-status">
+            <div className="spinner"></div>
+            <p>Loading messages...</p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && (
+          <div className="chat-status chat-error">
+            <p>{error}</p>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && !error && messages.length === 0 && (
+          <div className="chat-status">
+            <p className="chat-empty">No messages yet. Say hello!</p>
+          </div>
+        )}
+
         {messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
         
-        {/* --- NEW: Show AI Typing Indicator --- */}
+        {/* AI Typing Indicator */}
         {isAiTyping && (
           <div className="message-wrapper ai">
             <img 
@@ -201,9 +171,18 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         <span ref={messagesEndRef}></span>
       </div>
 
+      {/* --- Typing status bar --- */}
+      {typingStatusText() && (
+        <div className="typing-status-bar">
+          <div className="typing-indicator typing-indicator-sm">
+            <span></span><span></span><span></span>
+          </div>
+          <span>{typingStatusText()}</span>
+        </div>
+      )}
+
       {/* --- Send Form --- */}
       <form className="send-form" onSubmit={sendMessage}>
-        {/* --- NEW: Emoji Picker --- */}
         {showPicker && (
           <div className="emoji-picker-container">
             <Picker 
@@ -215,7 +194,6 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
           </div>
         )}
         
-        {/* --- NEW: Emoji Button --- */}
         <button 
           type="button" 
           className="emoji-btn" 
@@ -226,9 +204,9 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
 
         <input
           value={formValue}
-          onChange={(e) => setFormValue(e.target.value)}
+          onChange={handleInputChange}
           placeholder={`Message #${chatName} (try @RailaAI)`}
-          onClick={() => setShowPicker(false)} // Close picker when typing
+          onClick={() => setShowPicker(false)}
         />
         <button type="submit" disabled={!formValue.trim()}>
           Send

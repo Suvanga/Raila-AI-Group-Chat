@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { auth } from './firebase-config.js';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import React, { useState } from 'react';
+import { auth, functions } from './firebase-config.js';
+import { signOut } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 
 import './App.css'; 
 
@@ -8,38 +9,49 @@ import ChatRoom from './components/ChatRoom.jsx';
 import SignIn from './components/Signin.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import CreateGroupModal from './components/CreateGroupModal.jsx';
+import { useAuth } from './hooks/useAuth.js';
+import { usePresence } from './hooks/usePresence.js';
 
 function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading } = useAuth();
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   
   // AI configuration state
   const [aiModel, setAiModel] = useState('Generic');
   const [aiMode, setAiMode] = useState('Sushil');
 
-  // This state will control which chat room is visible.
   const [activeChat, setActiveChat] = useState({
     id: 'public',
     name: 'Public Chat'
   });
 
-  useEffect(() => {
-    // This listener is the core of the app.
-    // It runs once on load, and any time the user logs in or out.
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser); // Will be null if logged out, or a user object if logged in
-      setLoading(false);
-    });
-    // Cleanup the listener when the component unmounts
-    return () => unsubscribe();
-  }, []);
+  // Track online presence for the logged-in user
+  usePresence();
 
   // Close sidebar on room switch (mobile)
   const handleSetActiveChat = (chat) => {
     setActiveChat(chat);
     setSidebarOpen(false);
+    setSummary(null);
+  };
+
+  // Summarize the current room via Cloud Function
+  const handleSummarize = async () => {
+    setSummaryLoading(true);
+    setSummary(null);
+    try {
+      const summarizeRoom = httpsCallable(functions, 'summarizeRoom');
+      const result = await summarizeRoom({ chatId: activeChat.id });
+      setSummary(result.data?.summary || 'No summary available.');
+    } catch (err) {
+      console.error('Summarize error:', err);
+      setSummary('Failed to generate summary. Please try again.');
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
   // Show a loading spinner while Firebase is checking auth state
@@ -87,8 +99,30 @@ function App() {
                 </button>
                 <h2>{activeChat.name}</h2>
               </div>
-              <SignOut />
+              <div className="chat-header-right">
+                <button
+                  className="summarize-btn"
+                  onClick={handleSummarize}
+                  disabled={summaryLoading}
+                  title="AI Summary of this room"
+                >
+                  {summaryLoading ? 'Summarizing...' : '✨ Summarize'}
+                </button>
+                <SignOut />
+              </div>
             </header>
+
+            {/* AI Summary Panel */}
+            {summary && (
+              <div className="summary-panel">
+                <div className="summary-header">
+                  <span className="summary-label">✨ AI Summary</span>
+                  <button className="summary-close" onClick={() => setSummary(null)}>✕</button>
+                </div>
+                <div className="summary-body">{summary}</div>
+              </div>
+            )}
+
             <ChatRoom 
               chatId={activeChat.id} 
               chatName={activeChat.name}
