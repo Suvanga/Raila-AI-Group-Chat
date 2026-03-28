@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 
 // Add setShowCreateGroupModal prop
-function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal }) {
+function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isOpen }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [groupChats, setGroupChats] = useState([]); // <-- State for our new groups
@@ -89,7 +89,7 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal }) {
   };
 
   return (
-    <nav className="sidebar">
+    <nav className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       
       <div className="sidebar-header">
         <h1>Raila AI <span>Chat</span></h1>

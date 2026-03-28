@@ -81,7 +81,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         systemPrompt += "You are acting as a strict but helpful budgeting assistant. Give practical financial advice.";
         break;
       case 'Homework Help':
-// ... existingcode ...
+        systemPrompt += "You are acting as a patient and encouraging homework helper. Explain concepts clearly and guide the user step by step.";
         break;
       default: // Generic
         systemPrompt += "You are a general-purpose AI. Be helpful and concise.";
@@ -179,14 +179,21 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         
         {/* --- NEW: Show AI Typing Indicator --- */}
         {isAiTyping && (
-          <div className="message-wrapper received">
+          <div className="message-wrapper ai">
             <img 
               className="message-avatar"
               src="https://api.dicebear.com/8.x/bottts/svg?seed=RailaAI" 
               alt="RailaAI" 
             />
             <div className="message-content">
-              <p>... typing ...</p>
+              <div className="message-meta">
+                <span className="message-sender">RailaAI</span>
+              </div>
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
         )}
