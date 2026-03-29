@@ -26,7 +26,7 @@ exports.generateAiResponse = onCall(
       );
     }
 
-    const { message, aiModel, aiMode } = request.data;
+    const { message, aiModel, aiMode, history } = request.data;
 
     if (!message || typeof message !== "string") {
       throw new HttpsError(
@@ -35,7 +35,6 @@ exports.generateAiResponse = onCall(
       );
     }
 
-    // Build system prompt from AI model and mode selections
     let systemPrompt = "You are RailaAI, a helpful assistant in a group chat. ";
 
     switch (aiModel) {
@@ -68,7 +67,8 @@ exports.generateAiResponse = onCall(
         " Your personality is 'Sushil'. You are extremely polite, formal, kind, and helpful to everyone. You are very nice.";
     }
 
-    const aiText = await callGemini(systemPrompt, message);
+    const conversationHistory = Array.isArray(history) ? history.slice(-10) : [];
+    const aiText = await callGemini(systemPrompt, message, conversationHistory);
     return { text: aiText };
   }
 );
@@ -139,13 +139,169 @@ exports.summarizeRoom = onCall(
   }
 );
 
-// --- Shared helper: call Gemini API ---
-async function callGemini(systemPrompt, userMessage) {
+/**
+ * Cloud Function: createInviteCode
+ *
+ * Generates a unique invite code. Only approved users can create invites.
+ */
+exports.createInviteCode = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  const userData = userDoc.data();
+  if (!userData?.approved) {
+    throw new HttpsError("permission-denied", "Only approved members can create invite codes.");
+  }
+
+  const { maxUses = 1, expiresInDays = 7 } = request.data || {};
+
+  const code = generateCode();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + Math.min(expiresInDays, 30));
+
+  await db.collection("invites").doc(code).set({
+    code,
+    createdBy: request.auth.uid,
+    createdByName: request.auth.token.name || request.auth.token.email,
+    createdAt: new Date(),
+    expiresAt,
+    maxUses: Math.min(maxUses, 50),
+    usedBy: [],
+    usedCount: 0,
+    active: true,
+  });
+
+  return { code, expiresAt: expiresAt.toISOString() };
+});
+
+/**
+ * Cloud Function: redeemInviteCode
+ *
+ * Validates an invite code and marks the user as approved.
+ */
+exports.redeemInviteCode = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const { code } = request.data;
+  if (!code || typeof code !== "string") {
+    throw new HttpsError("invalid-argument", "A valid invite code is required.");
+  }
+
+  const inviteRef = db.collection("invites").doc(code.toUpperCase().trim());
+  const inviteDoc = await inviteRef.get();
+
+  if (!inviteDoc.exists()) {
+    throw new HttpsError("not-found", "Invalid invite code.");
+  }
+
+  const invite = inviteDoc.data();
+
+  if (!invite.active) {
+    throw new HttpsError("failed-precondition", "This invite code has been deactivated.");
+  }
+
+  if (invite.expiresAt && invite.expiresAt.toDate() < new Date()) {
+    throw new HttpsError("failed-precondition", "This invite code has expired.");
+  }
+
+  if (invite.usedCount >= invite.maxUses) {
+    throw new HttpsError("failed-precondition", "This invite code has reached its usage limit.");
+  }
+
+  if (invite.usedBy && invite.usedBy.includes(request.auth.uid)) {
+    throw new HttpsError("already-exists", "You have already used this invite code.");
+  }
+
+  const batch = db.batch();
+
+  batch.update(inviteRef, {
+    usedBy: [...(invite.usedBy || []), request.auth.uid],
+    usedCount: (invite.usedCount || 0) + 1,
+  });
+
+  const userRef = db.collection("users").doc(request.auth.uid);
+  batch.set(userRef, {
+    approved: true,
+    approvedAt: new Date(),
+    inviteCode: code.toUpperCase().trim(),
+  }, { merge: true });
+
+  await batch.commit();
+  return { success: true };
+});
+
+/**
+ * Cloud Function: getInviteCodes
+ *
+ * Admin function to list all invite codes.
+ */
+exports.getInviteCodes = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  const userData = userDoc.data();
+  if (userData?.role !== "admin") {
+    throw new HttpsError("permission-denied", "Admin access required.");
+  }
+
+  const snapshot = await db.collection("invites").orderBy("createdAt", "desc").limit(50).get();
+  const codes = [];
+  snapshot.forEach((doc) => codes.push({ id: doc.id, ...doc.data() }));
+
+  return { codes };
+});
+
+/**
+ * Cloud Function: toggleInviteCode
+ *
+ * Admin function to activate/deactivate an invite code.
+ */
+exports.toggleInviteCode = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (userDoc.data()?.role !== "admin") {
+    throw new HttpsError("permission-denied", "Admin access required.");
+  }
+
+  const { code, active } = request.data;
+  if (!code) throw new HttpsError("invalid-argument", "Code is required.");
+
+  await db.collection("invites").doc(code).update({ active: !!active });
+  return { success: true };
+});
+
+function generateCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+async function callGemini(systemPrompt, userMessage, history = []) {
   const apiKey = geminiApiKey.value();
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
+  const contents = [];
+  for (const msg of history) {
+    const role = msg.role === "model" ? "model" : "user";
+    const prefix = role === "user" ? `[${msg.sender}]: ` : "";
+    contents.push({ role, parts: [{ text: prefix + msg.text }] });
+  }
+  contents.push({ role: "user", parts: [{ text: userMessage }] });
+
   const payload = {
-    contents: [{ parts: [{ text: userMessage }] }],
+    contents,
     systemInstruction: {
       parts: [{ text: systemPrompt }],
     },

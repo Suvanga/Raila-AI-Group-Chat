@@ -53,11 +53,16 @@ service cloud.firestore {
     }
 
     // --- Presence ---
-    // Anyone authenticated can read presence.
-    // Users can only write their own presence.
     match /presence/{userId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // --- Invite Codes ---
+    // Managed via Cloud Functions; direct client access is read-only for admins
+    match /invites/{codeId} {
+      allow read: if request.auth != null;
+      allow write: if false;
     }
   }
 }
