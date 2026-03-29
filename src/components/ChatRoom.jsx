@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { db, auth, functions, storage } from '../firebase-config.js';
 import {
   collection,
@@ -11,6 +11,7 @@ import ChatMessage from './ChatMessage.jsx';
 import Picker from 'emoji-picker-react';
 import { useMessages } from '../hooks/useMessages.js';
 import { useTypingIndicator, useTypingUsers } from '../hooks/usePresence.js';
+import { useNotificationSound } from '../hooks/useNotificationSound.js';
 
 const SLASH_COMMANDS = [
   { cmd: '/trip', model: 'Trip Planner', label: 'Plan a trip', icon: '✈️' },
@@ -20,7 +21,7 @@ const SLASH_COMMANDS = [
   { cmd: '/ask', model: 'Generic', label: 'Ask anything', icon: '💬' },
 ];
 
-function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
+function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, showPinnedPanel, setShowPinnedPanel }) {
   const [formValue, setFormValue] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -28,9 +29,13 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
   const [slashFilter, setSlashFilter] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [showNewMsgPill, setShowNewMsgPill] = useState(false);
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const messageListRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
 
   const {
     messages,
@@ -38,12 +43,58 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
     syncing,
     error,
     messagesEndRef,
-    messagesCollectionPath
+    messagesCollectionPath,
+    hasMore,
+    loadMore,
+    loadingMore,
   } = useMessages(chatId);
   const { setTyping } = useTypingIndicator(chatId);
   const typingUsers = useTypingUsers(chatId);
+  const playNotification = useNotificationSound();
+  const pinnedMessages = useMemo(() => messages.filter(m => m.pinned), [messages]);
   const showLoadingState = loading && messages.length === 0;
   const showEmptyState = !error && messages.length === 0 && !showLoadingState;
+
+  const checkIfNearBottom = useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const nearBottom = checkIfNearBottom();
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) setShowNewMsgPill(false);
+  }, [checkIfNearBottom]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const isNewMessage = messages.length > prevMessageCountRef.current;
+    prevMessageCountRef.current = messages.length;
+
+    if (!isNewMessage) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+
+    const lastMsg = messages[messages.length - 1];
+    const isFromOther = lastMsg?.uid !== auth.currentUser?.uid;
+
+    if (isFromOther && prevMessageCountRef.current > 1) {
+      playNotification();
+    }
+
+    if (isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (isFromOther) {
+      setShowNewMsgPill(true);
+    }
+  }, [messages, messagesEndRef]);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowNewMsgPill(false);
+  }, [messagesEndRef]);
 
   const filteredCommands = useMemo(() => {
     if (!slashFilter) return SLASH_COMMANDS;
@@ -184,7 +235,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
 
     const MAX_SIZE = 10 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
-      alert('File too large. Max 10MB.');
+      addToast?.('File too large. Max 10MB.', 'error');
       return;
     }
 
@@ -212,7 +263,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
       });
     } catch (err) {
       console.error("File upload error:", err);
-      alert('Failed to upload file. Please try again.');
+      addToast?.('Failed to upload file. Please try again.', 'error');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -259,6 +310,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
           collectionPath={messagesCollectionPath}
           onReply={setReplyingTo}
           highlight={isMatch ? searchQuery : null}
+          onToast={addToast}
         />
       );
     }
@@ -279,8 +331,32 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
         <h2>{chatName}</h2>
       </div>
 
+      {/* --- Pinned Messages Panel --- */}
+      {showPinnedPanel && (
+        <div className="pinned-panel">
+          <div className="pinned-panel-header">
+            <span>📌 Pinned Messages ({pinnedMessages.length})</span>
+            <button className="pinned-panel-close" onClick={() => setShowPinnedPanel(false)}>✕</button>
+          </div>
+          <div className="pinned-panel-body">
+            {pinnedMessages.length === 0 ? (
+              <p className="pinned-empty">No pinned messages yet</p>
+            ) : (
+              pinnedMessages.map(msg => (
+                <div key={msg.id} className="pinned-item">
+                  <span className="pinned-item-sender">
+                    {msg.uid === 'RailaAI' ? 'RailaAI' : (msg.email?.split('@')[0] || 'User')}
+                  </span>
+                  <span className="pinned-item-text">{msg.text?.slice(0, 120)}{msg.text?.length > 120 ? '...' : ''}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {/* --- Message List --- */}
-      <div className="message-list">
+      <div className="message-list" ref={messageListRef} onScroll={handleScroll}>
         {/* Loading state */}
         {showLoadingState && (
           <div className="chat-status">
@@ -303,6 +379,18 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
             {syncing && (
               <p className="chat-syncing">Still syncing the room in the background...</p>
             )}
+          </div>
+        )}
+
+        {hasMore && (
+          <div className="load-more-container">
+            <button
+              className="load-more-btn"
+              onClick={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : 'Load older messages'}
+            </button>
           </div>
         )}
 
@@ -331,6 +419,13 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
 
         <span ref={messagesEndRef}></span>
       </div>
+
+      {/* --- New Messages Pill --- */}
+      {showNewMsgPill && (
+        <button className="new-messages-pill" onClick={scrollToBottom}>
+          ↓ New messages
+        </button>
+      )}
 
       {/* --- Typing status bar --- */}
       {typingStatusText() && (

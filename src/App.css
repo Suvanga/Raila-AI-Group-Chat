@@ -356,6 +356,7 @@ body {
   flex-shrink: 0;
   width: 22px;
   height: 22px;
+  overflow: visible;
 }
 .dm-avatar {
   width: 22px;
@@ -395,6 +396,16 @@ body {
   bottom: 0;
   right: 0;
 }
+.last-seen-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 .dm-name {
   flex: 1;
   min-width: 0;
@@ -778,6 +789,7 @@ body {
    Chat Room
    ============================================= */
 .chat-room {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -860,6 +872,58 @@ body {
 .chat-syncing {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+/* Load more button */
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+.load-more-btn {
+  background: var(--background-medium);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 0.4rem 1.25rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: var(--background-dark);
+  color: var(--text-primary);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* New messages pill */
+.new-messages-pill {
+  position: absolute;
+  bottom: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--primary-color);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: fadeIn 0.2s ease;
+  transition: background 0.2s;
+}
+
+.new-messages-pill:hover {
+  background: var(--primary-hover);
 }
 
 /* Typing status bar */
@@ -1165,6 +1229,14 @@ body {
 }
 .reply-btn-action:hover {
   color: var(--accent-green);
+}
+
+.delete-btn-action {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.delete-btn-action:hover {
+  color: #e74c3c;
 }
 
 /* Reaction Badges */
@@ -1989,6 +2061,223 @@ body {
   inset: 0;
   background-color: rgba(0, 0, 0, 0.6);
   z-index: 90;
+}
+
+/* =============================================
+   Pinned Messages
+   ============================================= */
+.pinned-badge {
+  font-size: 0.65rem;
+  margin-left: 0.25rem;
+}
+
+.pin-btn-action {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.pin-btn-action:hover {
+  color: #f39c12;
+}
+
+.pinned-panel {
+  border-bottom: 1px solid var(--border-color);
+  background: var(--background-dark);
+  max-height: 200px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.pinned-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pinned-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.pinned-panel-body {
+  padding: 0.5rem;
+}
+
+.pinned-empty {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 0.5rem;
+}
+
+.pinned-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid #f39c12;
+  margin-bottom: 0.35rem;
+  background: var(--background-medium);
+}
+
+.pinned-item-sender {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent-green);
+}
+
+.pinned-item-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* =============================================
+   Group Members Panel
+   ============================================= */
+.members-panel {
+  max-width: 400px;
+  max-height: 80vh;
+}
+
+.members-panel h2 {
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.member-row:hover {
+  background: var(--background-dark);
+}
+
+.member-avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.member-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.member-avatar-wrapper .presence-dot {
+  width: 10px;
+  height: 10px;
+  bottom: 0;
+  right: 0;
+}
+
+.member-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.member-status {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.member-status.online {
+  color: #43b581;
+}
+
+.leave-group-btn {
+  margin-top: 1.25rem;
+  width: 100%;
+  padding: 0.6rem;
+  background: transparent;
+  border: 1px solid #e74c3c;
+  color: #e74c3c;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.leave-group-btn:hover {
+  background: #e74c3c;
+  color: #fff;
+}
+
+/* =============================================
+   Toast Notifications
+   ============================================= */
+.toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 380px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--background-medium);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: slideInRight 0.25s ease;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.toast-success { border-left: 3px solid var(--accent-green); }
+.toast-error { border-left: 3px solid #e74c3c; }
+.toast-info { border-left: 3px solid var(--primary-color); }
+.toast-warning { border-left: 3px solid #f39c12; }
+
+.toast-message {
+  flex: 1;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.toast-close:hover {
+  color: var(--text-primary);
 }
 
 /* =============================================
