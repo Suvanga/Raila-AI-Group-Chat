@@ -31,7 +31,7 @@ function SignIn() {
           // This will catch errors from setDoc
           console.error("FIRESTORE ERROR:", firestoreError.message);
           console.error("Error Code:", firestoreError.code);
-          alert(`Error saving user: ${firestoreError.message}`);
+          console.error(`Error saving user: ${firestoreError.message}`);
         }
         
       })
@@ -39,7 +39,7 @@ function SignIn() {
         // This will catch errors from signInWithPopup
         console.error("AUTH ERROR:", authError.message);
         console.error("Error Code:", authError.code);
-        alert(`Error signing in: ${authError.message}`);
+        console.error(`Error signing in: ${authError.message}`);
       });
   };
 

@@ -12,6 +12,8 @@ import Sidebar from './components/Sidebar.jsx';
 import CreateGroupModal from './components/CreateGroupModal.jsx';
 import InviteGate from './components/InviteGate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
+import GroupMembersPanel from './components/GroupMembersPanel.jsx';
+import { ToastContainer, useToast } from './components/ToastContainer.jsx';
 import { useAuth } from './hooks/useAuth.js';
 import { usePresence } from './hooks/usePresence.js';
 
@@ -43,6 +45,9 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showMembersPanel, setShowMembersPanel] = useState(false);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
+  const { toasts, addToast, removeToast } = useToast();
 
   useEffect(() => {
     if (!user) {
@@ -76,6 +81,7 @@ function App() {
     setActiveChat(chat);
     setSidebarOpen(false);
     setSummary(null);
+    setShowMembersPanel(false);
   };
 
   // Summarize the current room via Cloud Function
@@ -105,6 +111,7 @@ function App() {
 
   return (
     <div className="App">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
       {!user ? (
         <SignIn />
       ) : !approved ? (
@@ -148,6 +155,22 @@ function App() {
                 >
                   🔍
                 </button>
+                <button
+                  className="header-icon-btn"
+                  onClick={() => setShowPinnedPanel(!showPinnedPanel)}
+                  title="Pinned messages"
+                >
+                  📌
+                </button>
+                {activeChat.isGroup && (
+                  <button
+                    className="header-icon-btn"
+                    onClick={() => setShowMembersPanel(true)}
+                    title="Members"
+                  >
+                    👥
+                  </button>
+                )}
                 <button
                   className={`ai-settings-toggle ${showAiSettings ? 'active' : ''}`}
                   onClick={() => setShowAiSettings(!showAiSettings)}
@@ -235,11 +258,25 @@ function App() {
               aiModel={aiModel}
               aiMode={aiMode}
               searchQuery={searchQuery}
+              addToast={addToast}
+              showPinnedPanel={showPinnedPanel}
+              setShowPinnedPanel={setShowPinnedPanel}
             />
           </main>
 
           {showCreateGroupModal && (
             <CreateGroupModal setShowModal={setShowCreateGroupModal} />
+          )}
+
+          {showMembersPanel && activeChat.isGroup && (
+            <GroupMembersPanel
+              chat={activeChat}
+              onClose={() => setShowMembersPanel(false)}
+              onLeave={() => {
+                setActiveChat({ id: 'public', name: 'Public Chat' });
+                addToast('You left the group', 'info');
+              }}
+            />
           )}
 
           {showAdminPanel && (

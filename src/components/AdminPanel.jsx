@@ -36,7 +36,7 @@ function AdminPanel({ setShowModal }) {
       fetchCodes();
     } catch (err) {
       console.error('Create invite error:', err);
-      alert('Failed to create invite code.');
+      console.error('Failed to create invite code.');
     } finally {
       setCreating(false);
     }
