@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { db, auth } from '../firebase-config.js';
+import { db, auth, functions } from '../firebase-config.js';
 import { 
   collection, 
   query, 
@@ -11,10 +11,25 @@ import {
   limit,
   serverTimestamp,
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { useChatList } from '../hooks/useChatList.js';
 import { useUnread } from '../hooks/useUnread.js';
+import { useUserPresence } from '../hooks/usePresence.js';
 
-function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isOpen }) {
+// Small component to show a green/gray dot for a user's online status
+function PresenceDot({ uid }) {
+  const { online } = useUserPresence(uid);
+  return (
+    <span
+      className={`presence-dot ${online ? 'online' : 'offline'}`}
+      title={online ? 'Online' : 'Offline'}
+    />
+  );
+}
+
+function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isOpen, userRole, setShowAdminPanel }) {
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
 
@@ -141,23 +156,29 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
         {dmChats.length === 0 && (
           <div className="menu-item-disabled">No conversations yet</div>
         )}
-        {dmChats.map(dm => (
-          <button
-            key={dm.id}
-            className={`menu-item dm-item ${activeChat.id === dm.id ? 'active' : ''}`}
-            onClick={() => setActiveChat({ id: dm.id, name: dm.displayName })}
-          >
-            <img 
-              className="dm-avatar" 
-              src={dm.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${dm.displayName}`} 
-              alt={dm.displayName} 
-            />
-            <span className="dm-name">{dm.displayName}</span>
-            {unreadCounts[dm.id] > 0 && (
-              <span className="unread-badge">{unreadCounts[dm.id]}</span>
-            )}
-          </button>
-        ))}
+        {dmChats.map(dm => {
+          const otherUid = dm.members?.find(m => m !== auth.currentUser?.uid);
+          return (
+            <button
+              key={dm.id}
+              className={`menu-item dm-item ${activeChat.id === dm.id ? 'active' : ''}`}
+              onClick={() => setActiveChat({ id: dm.id, name: dm.displayName })}
+            >
+              <div className="dm-avatar-wrapper">
+                <img 
+                  className="dm-avatar" 
+                  src={dm.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${dm.displayName}`} 
+                  alt={dm.displayName} 
+                />
+                {otherUid && <PresenceDot uid={otherUid} />}
+              </div>
+              <span className="dm-name">{dm.displayName}</span>
+              {unreadCounts[dm.id] > 0 && (
+                <span className="unread-badge">{unreadCounts[dm.id]}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* --- FRIENDS (USER SEARCH) SECTION --- */}
@@ -187,9 +208,57 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
         </div>
       </div>
       
-      {/* --- User Profile Section --- */}
+      {/* --- Invite & Admin Section --- */}
+      <div className="sidebar-menu-section">
+        <p className="menu-title">Invite Friends</p>
+        {generatedCode ? (
+          <div className="invite-code-result">
+            <code className="invite-code-display">{generatedCode}</code>
+            <button
+              className="invite-copy-btn"
+              onClick={() => {
+                navigator.clipboard.writeText(generatedCode);
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        ) : (
+          <button
+            className="menu-item invite-generate-btn"
+            onClick={async () => {
+              setInviteLoading(true);
+              try {
+                const createInviteCode = httpsCallable(functions, 'createInviteCode');
+                const result = await createInviteCode({ maxUses: 5, expiresInDays: 7 });
+                setGeneratedCode(result.data?.code);
+              } catch (err) {
+                console.error('Invite create error:', err);
+              } finally {
+                setInviteLoading(false);
+              }
+            }}
+            disabled={inviteLoading}
+          >
+            {inviteLoading ? 'Generating...' : '+ Generate Invite Code'}
+          </button>
+        )}
+
+        {userRole === 'admin' && (
+          <button
+            className="menu-item admin-btn"
+            onClick={() => setShowAdminPanel(true)}
+          >
+            Admin Panel
+          </button>
+        )}
+      </div>
+
       <div className="sidebar-user-info">
-        <img src={user.photoURL} alt="Your avatar" />
+        <div className="dm-avatar-wrapper sidebar-avatar-wrapper">
+          <img src={user.photoURL} alt="Your avatar" />
+          <span className="presence-dot online" title="Online" />
+        </div>
         <span>{user.displayName}</span>
       </div>
     </nav>
