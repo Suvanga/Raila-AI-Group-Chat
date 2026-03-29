@@ -153,6 +153,12 @@ body {
   height: 20px;
 }
 
+.sign-in-error {
+  color: #e74c3c;
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0;
+  line-height: 1.4;
+}
 .sign-in-footer {
   margin-top: 1.5rem;
   font-size: 0.8rem;
@@ -2243,14 +2249,17 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
   border-radius: var(--radius-md);
-  background: var(--background-medium);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  animation: slideInRight 0.25s ease;
-  color: var(--text-primary);
-  font-size: 0.85rem;
+  background: #1e1e2e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  animation: slideInRight 0.3s ease;
+  color: #f0f0f0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  min-width: 280px;
 }
 
 @keyframes slideInRight {
@@ -2258,10 +2267,22 @@ body {
   to { transform: translateX(0); opacity: 1; }
 }
 
-.toast-success { border-left: 3px solid var(--accent-green); }
-.toast-error { border-left: 3px solid #e74c3c; }
-.toast-info { border-left: 3px solid var(--primary-color); }
-.toast-warning { border-left: 3px solid #f39c12; }
+.toast-success {
+  border-left: 4px solid var(--accent-green);
+  background: #1a2e1a;
+}
+.toast-error {
+  border-left: 4px solid #e74c3c;
+  background: #2e1a1a;
+}
+.toast-info {
+  border-left: 4px solid var(--primary-color);
+  background: #1a1a2e;
+}
+.toast-warning {
+  border-left: 4px solid #f39c12;
+  background: #2e2a1a;
+}
 
 .toast-message {
   flex: 1;
@@ -2278,6 +2299,120 @@ body {
 }
 .toast-close:hover {
   color: var(--text-primary);
+}
+
+/* =============================================
+   Multi-Select / Bulk Delete
+   ============================================= */
+.chat-room-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.25rem 1rem;
+}
+
+.select-mode-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.select-mode-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+.select-mode-btn.active {
+  background: rgba(231, 76, 60, 0.15);
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
+.message-select-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  margin-right: 0.5rem;
+}
+.message-select-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--primary-color);
+}
+.message-select-disabled {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.message-wrapper.selectable {
+  cursor: pointer;
+}
+.message-wrapper.selectable:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+}
+.message-wrapper.selected {
+  background: rgba(116, 96, 238, 0.1);
+  border-radius: var(--radius-md);
+  outline: 1px solid rgba(116, 96, 238, 0.3);
+}
+
+.bulk-delete-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1.25rem;
+  background: #2e1a1a;
+  border-top: 1px solid rgba(231, 76, 60, 0.3);
+  animation: slideUp 0.2s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.bulk-delete-count {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.bulk-delete-btn {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.bulk-delete-btn:hover:not(:disabled) {
+  background: #c0392b;
+}
+.bulk-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.bulk-delete-cancel {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.bulk-delete-cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
 }
 
 /* =============================================

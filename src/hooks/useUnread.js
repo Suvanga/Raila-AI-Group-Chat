@@ -6,7 +6,6 @@ import {
   onSnapshot,
   collection,
   query,
-  where,
   orderBy,
   limit,
   serverTimestamp,

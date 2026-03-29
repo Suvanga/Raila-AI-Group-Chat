@@ -7,7 +7,6 @@ import {
   serverTimestamp,
   collection,
   query,
-  where,
   deleteDoc,
 } from 'firebase/firestore';
 
@@ -21,9 +20,8 @@ import {
  */
 
 // Set the current user as online and update lastSeen on disconnect
-export function usePresence() {
+export function usePresence(user) {
   useEffect(() => {
-    const user = auth.currentUser;
     if (!user) return;
 
     const presenceRef = doc(db, 'presence', user.uid);
@@ -64,7 +62,7 @@ export function usePresence() {
       window.removeEventListener('beforeunload', goOffline);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, []);
+  }, [user]);
 }
 
 // Subscribe to a specific user's presence

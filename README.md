@@ -2,6 +2,8 @@
 
 Realtime chat platform built with React, Firebase, and Google Gemini. Features invite-only access, room-based messaging, persistent direct messages, file sharing, emoji reactions, threaded replies, slash commands, AI-powered chat and summaries, online presence with typing indicators, and unread counts — all backed by Firebase Cloud Functions so no secrets touch the browser.
 
+This repository assumes the documented production setup: Firebase Auth + Firestore + Cloud Functions, with Blaze enabled for AI, invite management, and file uploads. Spark can be used only for ad hoc local experiments; tracked app code does not auto-approve users or bypass the invite/admin model.
+
 ## Live Demo
 
 [Add link here]
@@ -186,6 +188,13 @@ cp src/firebase-config.example.js src/firebase-config.js
 # Fill in your Firebase project credentials
 ```
 
+Before running the full feature set, make sure your Firebase project has:
+
+- Firestore enabled
+- Google Auth enabled
+- Cloud Functions deployed for invite management and AI features
+- Blaze plan enabled if you want AI or file uploads
+
 Start the dev server:
 
 ```bash
@@ -199,6 +208,12 @@ cd functions && npm install && cd ..
 firebase functions:secrets:set GEMINI_API_KEY
 firebase deploy --only functions
 firebase deploy --only firestore:rules
+```
+
+Run the Firestore rules suite locally:
+
+```bash
+npm run test:rules
 ```
 
 ## What I'd Improve Next

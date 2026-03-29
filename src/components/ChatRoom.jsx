@@ -1,12 +1,12 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { db, auth, functions, storage } from '../firebase-config.js';
+import { db, auth } from '../firebase-config.js';
 import {
   collection,
   addDoc,
+  deleteDoc,
+  doc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import ChatMessage from './ChatMessage.jsx';
 import Picker from 'emoji-picker-react';
 import { useMessages } from '../hooks/useMessages.js';
@@ -21,18 +21,18 @@ const SLASH_COMMANDS = [
   { cmd: '/ask', model: 'Generic', label: 'Ask anything', icon: '💬' },
 ];
 
-function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, showPinnedPanel, setShowPinnedPanel }) {
+function ChatRoom({ chatId, chatName, searchQuery, addToast, showPinnedPanel, setShowPinnedPanel }) {
   const [formValue, setFormValue] = useState('');
-  const [isAiTyping, setIsAiTyping] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
-  const [uploading, setUploading] = useState(false);
   const [showNewMsgPill, setShowNewMsgPill] = useState(false);
   const typingTimeoutRef = useRef(null);
   const inputRef = useRef(null);
-  const fileInputRef = useRef(null);
   const messageListRef = useRef(null);
   const isNearBottomRef = useRef(true);
   const prevMessageCountRef = useRef(0);
@@ -89,7 +89,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
     } else if (isFromOther) {
       setShowNewMsgPill(true);
     }
-  }, [messages, messagesEndRef]);
+  }, [messages, messagesEndRef, playNotification]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -130,46 +130,9 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
     setShowPicker(false);
   };
 
-  const postAiMessage = async (text) => {
-    const messagesRef = collection(db, messagesCollectionPath);
-    await addDoc(messagesRef, {
-      text: text,
-      createdAt: serverTimestamp(),
-      uid: "RailaAI",
-      email: "bot@raila.ai",
-      photoURL: "https://api.dicebear.com/8.x/bottts/svg?seed=RailaAI"
-    });
-  };
-
-  const getAiResponse = async (userMessage, overrideModel) => {
-    setIsAiTyping(true);
-
-    const history = messages.slice(-10).map(m => ({
-      role: m.uid === 'RailaAI' ? 'model' : 'user',
-      text: m.text,
-      sender: m.uid === 'RailaAI' ? 'RailaAI' : (m.email?.split('@')[0] || 'User'),
-    }));
-
-    try {
-      const generateAiResponse = httpsCallable(functions, 'generateAiResponse');
-      const result = await generateAiResponse({
-        message: userMessage,
-        aiModel: overrideModel || aiModel || 'Generic',
-        aiMode: aiMode || 'Sushil',
-        history,
-      });
-
-      if (result.data?.text) {
-        await postAiMessage(result.data.text);
-      } else {
-        await postAiMessage("Sorry, I had trouble thinking of a response.");
-      }
-    } catch (err) {
-      console.error("AI Cloud Function Error:", err);
-      await postAiMessage("Sorry, I'm having connection issues. Please try again.");
-    } finally {
-      setIsAiTyping(false);
-    }
+  // AI responses require Cloud Functions (Blaze plan)
+  const getAiResponse = async () => {
+    addToast?.('AI features require Firebase Blaze plan (Cloud Functions). Upgrade to enable @RailaAI and slash commands.', 'warning', 5000);
   };
 
   const parseSlashCommand = (text) => {
@@ -229,45 +192,9 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
     }
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const MAX_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-      addToast?.('File too large. Max 10MB.', 'error');
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const { uid, photoURL, email } = auth.currentUser;
-      const timestamp = Date.now();
-      const storageRef = ref(storage, `chat-files/${chatId}/${timestamp}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(storageRef);
-
-      const isImage = file.type.startsWith('image/');
-      const messagesRef = collection(db, messagesCollectionPath);
-
-      await addDoc(messagesRef, {
-        text: isImage ? '' : `📎 ${file.name}`,
-        createdAt: serverTimestamp(),
-        uid,
-        email,
-        photoURL: photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`,
-        fileURL: downloadURL,
-        fileName: file.name,
-        fileType: file.type,
-        isImage,
-      });
-    } catch (err) {
-      console.error("File upload error:", err);
-      addToast?.('Failed to upload file. Please try again.', 'error');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+  // File uploads require Firebase Storage (Blaze plan)
+  const handleFileUpload = () => {
+    addToast?.('File uploads require Firebase Blaze plan (Storage). Upgrade to enable.', 'warning', 5000);
   };
 
   const formatDateSeparator = (timestamp) => {
@@ -311,6 +238,19 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
           onReply={setReplyingTo}
           highlight={isMatch ? searchQuery : null}
           onToast={addToast}
+          selectMode={selectMode}
+          isSelected={selectedIds.has(msg.id)}
+          onToggleSelect={(id) => {
+            setSelectedIds(prev => {
+              const next = new Set(prev);
+              if (next.has(id)) {
+                next.delete(id);
+              } else {
+                next.add(id);
+              }
+              return next;
+            });
+          }}
         />
       );
     }
@@ -326,9 +266,18 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
 
   return (
     <main className="chat-room">
-      {/* --- Chat Header --- */}
-      <div className="chat-room-header">
-        <h2>{chatName}</h2>
+      {/* --- Select Mode Toggle --- */}
+      <div className="chat-room-toolbar">
+        <button
+          className={`select-mode-btn ${selectMode ? 'active' : ''}`}
+          onClick={() => {
+            setSelectMode(!selectMode);
+            setSelectedIds(new Set());
+          }}
+          title={selectMode ? 'Cancel selection' : 'Select messages'}
+        >
+          {selectMode ? '✕ Cancel' : '☑ Select'}
+        </button>
       </div>
 
       {/* --- Pinned Messages Panel --- */}
@@ -395,30 +344,50 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
         )}
 
         {renderMessagesWithDates()}
-        
-        {/* AI Typing Indicator */}
-        {isAiTyping && (
-          <div className="message-wrapper ai">
-            <img 
-              className="message-avatar"
-              src="https://api.dicebear.com/8.x/bottts/svg?seed=RailaAI" 
-              alt="RailaAI" 
-            />
-            <div className="message-content">
-              <div className="message-meta">
-                <span className="message-sender">RailaAI</span>
-              </div>
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </div>
-          </div>
-        )}
 
         <span ref={messagesEndRef}></span>
       </div>
+
+      {/* --- Bulk Delete Action Bar --- */}
+      {selectMode && selectedIds.size > 0 && (
+        <div className="bulk-delete-bar">
+          <span className="bulk-delete-count">{selectedIds.size} message{selectedIds.size > 1 ? 's' : ''} selected</span>
+          <button
+            className="bulk-delete-btn"
+            disabled={bulkDeleting}
+            onClick={async () => {
+              if (!window.confirm(`Delete ${selectedIds.size} message${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+              setBulkDeleting(true);
+              let deleted = 0;
+              let failed = 0;
+              for (const msgId of selectedIds) {
+                try {
+                  await deleteDoc(doc(db, messagesCollectionPath, msgId));
+                  deleted++;
+                } catch {
+                  failed++;
+                }
+              }
+              setBulkDeleting(false);
+              setSelectedIds(new Set());
+              setSelectMode(false);
+              if (failed > 0) {
+                addToast?.(`Deleted ${deleted} message${deleted !== 1 ? 's' : ''}. ${failed} failed (you can only delete your own).`, 'warning', 4000);
+              } else {
+                addToast?.(`Deleted ${deleted} message${deleted !== 1 ? 's' : ''}.`, 'success');
+              }
+            }}
+          >
+            {bulkDeleting ? 'Deleting...' : `Delete (${selectedIds.size})`}
+          </button>
+          <button
+            className="bulk-delete-cancel"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* --- New Messages Pill --- */}
       {showNewMsgPill && (
@@ -489,21 +458,13 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
           😊
         </button>
 
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          style={{ display: 'none' }}
-          accept="image/*,.pdf,.doc,.docx,.txt,.zip"
-        />
         <button
           type="button"
           className="emoji-btn file-attach-btn"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          title="Attach file"
+          onClick={handleFileUpload}
+          title="File uploads require Blaze plan"
         >
-          {uploading ? '⏳' : '📎'}
+          📎
         </button>
 
         <input
@@ -513,7 +474,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery, addToast, sh
           placeholder={`Message #${chatName} — try /trip, /homework, or @RailaAI`}
           onClick={() => setShowPicker(false)}
         />
-        <button type="submit" disabled={!formValue.trim() && !uploading}>
+        <button type="submit" disabled={!formValue.trim()}>
           Send
         </button>
       </form>

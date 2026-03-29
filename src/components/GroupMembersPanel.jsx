@@ -1,6 +1,6 @@
 import React from 'react';
 import { auth, db } from '../firebase-config.js';
-import { doc, updateDoc, arrayRemove } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { useUserPresence } from '../hooks/usePresence.js';
 
 function MemberRow({ member }) {
@@ -36,8 +36,11 @@ function GroupMembersPanel({ chat, onClose, onLeave }) {
     if (!window.confirm(`Leave "${chat.name}"? You won't see this group anymore.`)) return;
     try {
       const chatRef = doc(db, 'chats', chat.id);
+      const remainingMembers = (chat.members || []).filter((memberUid) => memberUid !== currentUid);
+      const remainingMembersInfo = members.filter((member) => member.uid !== currentUid);
       await updateDoc(chatRef, {
-        members: arrayRemove(currentUid),
+        members: remainingMembers,
+        membersInfo: remainingMembersInfo,
       });
       onLeave?.();
       onClose();

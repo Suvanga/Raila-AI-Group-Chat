@@ -17,9 +17,11 @@ function highlightText(text, query) {
   );
 }
 
-function ChatMessage({ message, collectionPath, onReply, highlight, onToast, onPin }) {
-  const { id, text, uid, photoURL, email, createdAt, reactions, replyTo, fileURL, fileName, fileType, isImage, pinned } = message;
+function ChatMessage({ message, collectionPath, onReply, highlight, onToast, selectMode, isSelected, onToggleSelect }) {
+  const { id, text, uid, photoURL, email, createdAt, reactions, replyTo, fileURL, fileName, isImage, pinned } = message;
   const currentUid = auth.currentUser.uid;
+  const isOwnMessage = uid === currentUid;
+  const canSelect = selectMode && isOwnMessage;
 
   let messageClass = '';
   if (uid === 'RailaAI') {
@@ -86,11 +88,27 @@ function ChatMessage({ message, collectionPath, onReply, highlight, onToast, onP
     }
   };
 
-  const isOwnMessage = uid === currentUid;
   const reactionEntries = reactions ? Object.entries(reactions).filter(([, uids]) => uids.length > 0) : [];
 
   return (
-    <div className={`message-wrapper ${messageClass}`}>
+    <div
+      className={`message-wrapper ${messageClass}${isSelected ? ' selected' : ''}${canSelect ? ' selectable' : ''}`}
+      onClick={canSelect ? () => onToggleSelect(id) : undefined}
+    >
+      {selectMode && (
+        <div className="message-select-checkbox">
+          {isOwnMessage ? (
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => onToggleSelect(id)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="message-select-disabled" title="You can only delete your own messages" />
+          )}
+        </div>
+      )}
       <img 
         className="message-avatar" 
         src={avatar} 

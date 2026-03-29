@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { db, auth, functions } from '../firebase-config.js';
-import { 
+import {
   collection, 
   query, 
   where, 
@@ -61,7 +61,7 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
     return ids;
   }, [groupChats, dmChats]);
 
-  const { unreadCounts, markAsRead } = useUnread(allChatIds, activeChat.id);
+  const { unreadCounts } = useUnread(allChatIds, activeChat.id);
 
   // Search for users in Firestore
   const handleSearch = async (e) => {

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { auth, db, functions } from './firebase-config.js';
+import { auth, db } from './firebase-config.js';
 import { signOut } from 'firebase/auth';
-import { httpsCallable } from 'firebase/functions';
 import { doc, onSnapshot } from 'firebase/firestore';
 
 import './App.css'; 
@@ -13,9 +12,10 @@ import CreateGroupModal from './components/CreateGroupModal.jsx';
 import InviteGate from './components/InviteGate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import GroupMembersPanel from './components/GroupMembersPanel.jsx';
-import { ToastContainer, useToast } from './components/ToastContainer.jsx';
+import ToastContainer from './components/ToastContainer.jsx';
 import { useAuth } from './hooks/useAuth.js';
 import { usePresence } from './hooks/usePresence.js';
+import { useToast } from './hooks/useToast.js';
 
 const AI_MODELS = [
   { value: 'Generic', label: 'General', icon: '💬' },
@@ -35,7 +35,7 @@ function App() {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [summary, setSummary] = useState(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryLoading] = useState(false);
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [approved, setApproved] = useState(null);
   const [userRole, setUserRole] = useState(null);
@@ -49,6 +49,7 @@ function App() {
   const [showPinnedPanel, setShowPinnedPanel] = useState(false);
   const { toasts, addToast, removeToast } = useToast();
 
+  // Approval and role come from Firestore; missing users stay gated.
   useEffect(() => {
     if (!user) {
       setApproved(null);
@@ -56,15 +57,24 @@ function App() {
       return;
     }
     const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setApproved(data.approved === true);
-        setUserRole(data.role || null);
-      } else {
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setApproved(data.approved === true);
+          setUserRole(data.role || null);
+        } else {
+          setApproved(false);
+          setUserRole(null);
+        }
+      },
+      (err) => {
+        console.error('Error checking approval:', err);
         setApproved(false);
+        setUserRole(null);
       }
-    });
+    );
     return () => unsubscribe();
   }, [user]);
 
@@ -74,7 +84,7 @@ function App() {
   });
 
   // Track online presence for the logged-in user
-  usePresence();
+  usePresence(user);
 
   // Close sidebar on room switch (mobile)
   const handleSetActiveChat = (chat) => {
@@ -84,20 +94,9 @@ function App() {
     setShowMembersPanel(false);
   };
 
-  // Summarize the current room via Cloud Function
+  // Summarize — requires Cloud Functions (Blaze plan)
   const handleSummarize = async () => {
-    setSummaryLoading(true);
-    setSummary(null);
-    try {
-      const summarizeRoom = httpsCallable(functions, 'summarizeRoom');
-      const result = await summarizeRoom({ chatId: activeChat.id });
-      setSummary(result.data?.summary || 'No summary available.');
-    } catch (err) {
-      console.error('Summarize error:', err);
-      setSummary('Failed to generate summary. Please try again.');
-    } finally {
-      setSummaryLoading(false);
-    }
+    setSummary('⚠️ AI Summary requires Firebase Blaze plan (Cloud Functions). Upgrade your project to enable this feature.');
   };
 
   if (loading || (user && approved === null)) {
@@ -255,8 +254,6 @@ function App() {
             <ChatRoom 
               chatId={activeChat.id} 
               chatName={activeChat.name}
-              aiModel={aiModel}
-              aiMode={aiMode}
               searchQuery={searchQuery}
               addToast={addToast}
               showPinnedPanel={showPinnedPanel}
