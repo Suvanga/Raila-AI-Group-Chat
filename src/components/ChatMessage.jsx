@@ -2,21 +2,23 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { auth, db } from '../firebase-config.js';
-import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '👀', '🎉'];
 
 function highlightText(text, query) {
   if (!query) return text;
-  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-  const parts = text.split(regex);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
   return parts.map((part, i) =>
-    regex.test(part) ? <mark key={i} className="search-highlight">{part}</mark> : part
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="search-highlight">{part}</mark>
+      : part
   );
 }
 
-function ChatMessage({ message, collectionPath, onReply, highlight }) {
-  const { id, text, uid, photoURL, email, createdAt, reactions, replyTo, fileURL, fileName, fileType, isImage } = message;
+function ChatMessage({ message, collectionPath, onReply, highlight, onToast, onPin }) {
+  const { id, text, uid, photoURL, email, createdAt, reactions, replyTo, fileURL, fileName, fileType, isImage, pinned } = message;
   const currentUid = auth.currentUser.uid;
 
   let messageClass = '';
@@ -60,6 +62,31 @@ function ChatMessage({ message, collectionPath, onReply, highlight }) {
     }
   };
 
+  const handlePin = async () => {
+    if (!collectionPath || !id) return;
+    try {
+      const msgRef = doc(db, collectionPath, id);
+      await updateDoc(msgRef, { pinned: !pinned });
+      onToast?.(pinned ? 'Message unpinned' : 'Message pinned', 'success');
+    } catch (err) {
+      console.error('Pin error:', err);
+      onToast?.('Failed to pin message', 'error');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!collectionPath || !id) return;
+    if (!window.confirm('Delete this message?')) return;
+    try {
+      await deleteDoc(doc(db, collectionPath, id));
+      onToast?.('Message deleted');
+    } catch (err) {
+      console.error('Delete error:', err);
+      onToast?.('Failed to delete message');
+    }
+  };
+
+  const isOwnMessage = uid === currentUid;
   const reactionEntries = reactions ? Object.entries(reactions).filter(([, uids]) => uids.length > 0) : [];
 
   return (
@@ -74,6 +101,7 @@ function ChatMessage({ message, collectionPath, onReply, highlight }) {
         <div className="message-meta">
           <span className="message-sender">{displayName}</span>
           <span className="message-time">{formatTime(createdAt)}</span>
+          {pinned && <span className="pinned-badge" title="Pinned">📌</span>}
         </div>
 
         {replyTo && (
@@ -137,6 +165,22 @@ function ChatMessage({ message, collectionPath, onReply, highlight }) {
               title="Reply"
             >
               ↩
+            </button>
+          )}
+          <button
+            className="action-btn pin-btn-action"
+            onClick={handlePin}
+            title={pinned ? 'Unpin' : 'Pin'}
+          >
+            {pinned ? '📌' : '📍'}
+          </button>
+          {isOwnMessage && (
+            <button
+              className="action-btn delete-btn-action"
+              onClick={handleDelete}
+              title="Delete message"
+            >
+              🗑
             </button>
           )}
         </div>
