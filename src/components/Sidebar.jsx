@@ -16,14 +16,32 @@ import { useChatList } from '../hooks/useChatList.js';
 import { useUnread } from '../hooks/useUnread.js';
 import { useUserPresence } from '../hooks/usePresence.js';
 
-// Small component to show a green/gray dot for a user's online status
-function PresenceDot({ uid }) {
-  const { online } = useUserPresence(uid);
+function formatLastSeen(lastSeen) {
+  if (!lastSeen) return 'Offline';
+  const date = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function PresenceDot({ uid, showLabel }) {
+  const { online, lastSeen } = useUserPresence(uid);
+  const tooltip = online ? 'Online' : `Last seen ${formatLastSeen(lastSeen)}`;
   return (
-    <span
-      className={`presence-dot ${online ? 'online' : 'offline'}`}
-      title={online ? 'Online' : 'Offline'}
-    />
+    <>
+      <span
+        className={`presence-dot ${online ? 'online' : 'offline'}`}
+        title={tooltip}
+      />
+      {showLabel && !online && lastSeen && (
+        <span className="last-seen-label">{formatLastSeen(lastSeen)}</span>
+      )}
+    </>
   );
 }
 
@@ -140,7 +158,7 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
           <button
             key={group.id}
             className={`menu-item ${activeChat.id === group.id ? 'active' : ''}`}
-            onClick={() => setActiveChat({ id: group.id, name: group.groupName })}
+            onClick={() => setActiveChat({ id: group.id, name: group.groupName, isGroup: true, members: group.members, membersInfo: group.membersInfo })}
           >
             <span># {group.groupName}</span>
             {unreadCounts[group.id] > 0 && (
@@ -170,7 +188,7 @@ function Sidebar({ user, activeChat, setActiveChat, setShowCreateGroupModal, isO
                   src={dm.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${dm.displayName}`} 
                   alt={dm.displayName} 
                 />
-                {otherUid && <PresenceDot uid={otherUid} />}
+                {otherUid && <PresenceDot uid={otherUid} showLabel />}
               </div>
               <span className="dm-name">{dm.displayName}</span>
               {unreadCounts[dm.id] > 0 && (
