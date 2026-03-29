@@ -1,43 +1,84 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { db, auth, functions } from '../firebase-config.js';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
+import { db, auth, functions, storage } from '../firebase-config.js';
 import {
   collection,
   addDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import ChatMessage from './ChatMessage.jsx';
 import Picker from 'emoji-picker-react';
 import { useMessages } from '../hooks/useMessages.js';
 import { useTypingIndicator, useTypingUsers } from '../hooks/usePresence.js';
 
-function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
+const SLASH_COMMANDS = [
+  { cmd: '/trip', model: 'Trip Planner', label: 'Plan a trip', icon: '✈️' },
+  { cmd: '/homework', model: 'Homework Help', label: 'Get homework help', icon: '📚' },
+  { cmd: '/budget', model: 'Budgeting', label: 'Budget & finance advice', icon: '💰' },
+  { cmd: '/date', model: 'Date Planner', label: 'Plan a date', icon: '❤️' },
+  { cmd: '/ask', model: 'Generic', label: 'Ask anything', icon: '💬' },
+];
+
+function ChatRoom({ chatId, chatName, aiModel, aiMode, searchQuery }) {
   const [formValue, setFormValue] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const typingTimeoutRef = useRef(null);
+  const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  // Custom hooks
-  const { messages, loading, error, messagesEndRef, messagesCollectionPath } = useMessages(chatId);
+  const {
+    messages,
+    loading,
+    syncing,
+    error,
+    messagesEndRef,
+    messagesCollectionPath
+  } = useMessages(chatId);
   const { setTyping } = useTypingIndicator(chatId);
   const typingUsers = useTypingUsers(chatId);
+  const showLoadingState = loading && messages.length === 0;
+  const showEmptyState = !error && messages.length === 0 && !showLoadingState;
 
-  // Handle typing indicator debounce
+  const filteredCommands = useMemo(() => {
+    if (!slashFilter) return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter(c => c.cmd.startsWith(slashFilter));
+  }, [slashFilter]);
+
   const handleInputChange = useCallback((e) => {
-    setFormValue(e.target.value);
+    const val = e.target.value;
+    setFormValue(val);
 
-    // Signal typing
+    if (val.startsWith('/') && !val.includes(' ')) {
+      setShowSlashMenu(true);
+      setSlashFilter(val.toLowerCase());
+    } else {
+      setShowSlashMenu(false);
+      setSlashFilter('');
+    }
+
     setTyping(true);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => setTyping(false), 2000);
   }, [setTyping]);
+
+  const handleSlashSelect = (cmd) => {
+    setFormValue(cmd.cmd + ' ');
+    setShowSlashMenu(false);
+    setSlashFilter('');
+    inputRef.current?.focus();
+  };
 
   const onEmojiClick = (emojiObject) => {
     setFormValue(prevInput => prevInput + emojiObject.emoji);
     setShowPicker(false);
   };
 
-  // Post AI message to Firestore
   const postAiMessage = async (text) => {
     const messagesRef = collection(db, messagesCollectionPath);
     await addDoc(messagesRef, {
@@ -49,16 +90,22 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
     });
   };
 
-  // Call AI via Firebase Cloud Function (API key stays server-side)
-  const getAiResponse = async (userMessage) => {
+  const getAiResponse = async (userMessage, overrideModel) => {
     setIsAiTyping(true);
+
+    const history = messages.slice(-10).map(m => ({
+      role: m.uid === 'RailaAI' ? 'model' : 'user',
+      text: m.text,
+      sender: m.uid === 'RailaAI' ? 'RailaAI' : (m.email?.split('@')[0] || 'User'),
+    }));
 
     try {
       const generateAiResponse = httpsCallable(functions, 'generateAiResponse');
       const result = await generateAiResponse({
         message: userMessage,
-        aiModel: aiModel || 'Generic',
+        aiModel: overrideModel || aiModel || 'Generic',
         aiMode: aiMode || 'Sushil',
+        history,
       });
 
       if (result.data?.text) {
@@ -74,39 +121,150 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
     }
   };
 
-  // Send Message
+  const parseSlashCommand = (text) => {
+    const match = SLASH_COMMANDS.find(c => text.toLowerCase().startsWith(c.cmd + ' ') || text.toLowerCase() === c.cmd);
+    if (match) {
+      const userMsg = text.slice(match.cmd.length).trim() || match.label;
+      return { model: match.model, message: userMsg };
+    }
+    return null;
+  };
+
   const sendMessage = async (e) => {
     e.preventDefault();
-    const messageText = formValue;
-    if (!messageText.trim()) return;
+    const messageText = formValue.trim();
+    if (!messageText) return;
 
     const { uid, photoURL, email } = auth.currentUser;
     const messagesRef = collection(db, messagesCollectionPath);
 
-    // Clear typing indicator immediately
     setTyping(false);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    setFormValue('');
+    setShowSlashMenu(false);
+
+    const currentReply = replyingTo;
+    setReplyingTo(null);
+
+    const slashCmd = parseSlashCommand(messageText);
+
+    const msgData = {
+      text: messageText,
+      createdAt: serverTimestamp(),
+      uid,
+      email,
+      photoURL: photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`
+    };
+
+    if (currentReply) {
+      msgData.replyTo = {
+        messageId: currentReply.id,
+        text: currentReply.text,
+        senderName: currentReply.uid === 'RailaAI' ? 'RailaAI' : (currentReply.email?.split('@')[0] || 'User'),
+      };
+    }
 
     try {
-      await addDoc(messagesRef, {
-        text: messageText,
-        createdAt: serverTimestamp(),
-        uid,
-        email,
-        photoURL: photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`
-      });
-      setFormValue('');
+      await addDoc(messagesRef, msgData);
 
-      // Check if AI was mentioned
-      if (messageText.toLowerCase().includes('@railaai')) {
+      if (slashCmd) {
+        getAiResponse(slashCmd.message, slashCmd.model);
+      } else if (messageText.toLowerCase().includes('@railaai')) {
         getAiResponse(messageText);
       }
     } catch (err) {
       console.error("Error sending message:", err);
+      setFormValue(messageText);
     }
   };
 
-  // Build typing status text
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert('File too large. Max 10MB.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const { uid, photoURL, email } = auth.currentUser;
+      const timestamp = Date.now();
+      const storageRef = ref(storage, `chat-files/${chatId}/${timestamp}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+
+      const isImage = file.type.startsWith('image/');
+      const messagesRef = collection(db, messagesCollectionPath);
+
+      await addDoc(messagesRef, {
+        text: isImage ? '' : `📎 ${file.name}`,
+        createdAt: serverTimestamp(),
+        uid,
+        email,
+        photoURL: photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${email}`,
+        fileURL: downloadURL,
+        fileName: file.name,
+        fileType: file.type,
+        isImage,
+      });
+    } catch (err) {
+      console.error("File upload error:", err);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const formatDateSeparator = (timestamp) => {
+    if (!timestamp) return null;
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === now.toDateString()) return 'Today';
+    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+  };
+
+  const getDateKey = (timestamp) => {
+    if (!timestamp) return null;
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toDateString();
+  };
+
+  const renderMessagesWithDates = () => {
+    const elements = [];
+    let lastDateKey = null;
+
+    for (const msg of messages) {
+      const dateKey = getDateKey(msg.createdAt);
+      if (dateKey && dateKey !== lastDateKey) {
+        elements.push(
+          <div key={`date-${dateKey}`} className="date-separator">
+            <span>{formatDateSeparator(msg.createdAt)}</span>
+          </div>
+        );
+        lastDateKey = dateKey;
+      }
+      const isMatch = searchQuery && msg.text?.toLowerCase().includes(searchQuery.toLowerCase());
+      elements.push(
+        <ChatMessage
+          key={msg.id}
+          message={msg}
+          collectionPath={messagesCollectionPath}
+          onReply={setReplyingTo}
+          highlight={isMatch ? searchQuery : null}
+        />
+      );
+    }
+    return elements;
+  };
+
   const typingStatusText = () => {
     if (typingUsers.length === 0) return null;
     if (typingUsers.length === 1) return `${typingUsers[0].displayName} is typing...`;
@@ -124,7 +282,7 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
       {/* --- Message List --- */}
       <div className="message-list">
         {/* Loading state */}
-        {loading && (
+        {showLoadingState && (
           <div className="chat-status">
             <div className="spinner"></div>
             <p>Loading messages...</p>
@@ -139,13 +297,16 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         )}
 
         {/* Empty state */}
-        {!loading && !error && messages.length === 0 && (
+        {showEmptyState && (
           <div className="chat-status">
             <p className="chat-empty">No messages yet. Say hello!</p>
+            {syncing && (
+              <p className="chat-syncing">Still syncing the room in the background...</p>
+            )}
           </div>
         )}
 
-        {messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
+        {renderMessagesWithDates()}
         
         {/* AI Typing Indicator */}
         {isAiTyping && (
@@ -181,6 +342,20 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         </div>
       )}
 
+      {/* --- Reply Bar --- */}
+      {replyingTo && (
+        <div className="reply-bar">
+          <div className="reply-bar-content">
+            <span className="reply-bar-label">Replying to </span>
+            <span className="reply-bar-sender">
+              {replyingTo.uid === 'RailaAI' ? 'RailaAI' : (replyingTo.email?.split('@')[0] || 'User')}
+            </span>
+            <span className="reply-bar-text">{replyingTo.text?.slice(0, 60)}{replyingTo.text?.length > 60 ? '...' : ''}</span>
+          </div>
+          <button className="reply-bar-close" onClick={() => setReplyingTo(null)}>✕</button>
+        </div>
+      )}
+
       {/* --- Send Form --- */}
       <form className="send-form" onSubmit={sendMessage}>
         {showPicker && (
@@ -193,6 +368,23 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
             />
           </div>
         )}
+
+        {showSlashMenu && filteredCommands.length > 0 && (
+          <div className="slash-menu">
+            {filteredCommands.map(cmd => (
+              <button
+                key={cmd.cmd}
+                type="button"
+                className="slash-menu-item"
+                onClick={() => handleSlashSelect(cmd)}
+              >
+                <span className="slash-menu-icon">{cmd.icon}</span>
+                <span className="slash-menu-cmd">{cmd.cmd}</span>
+                <span className="slash-menu-desc">{cmd.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
         
         <button 
           type="button" 
@@ -203,12 +395,30 @@ function ChatRoom({ chatId, chatName, aiModel, aiMode }) {
         </button>
 
         <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          accept="image/*,.pdf,.doc,.docx,.txt,.zip"
+        />
+        <button
+          type="button"
+          className="emoji-btn file-attach-btn"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title="Attach file"
+        >
+          {uploading ? '⏳' : '📎'}
+        </button>
+
+        <input
+          ref={inputRef}
           value={formValue}
           onChange={handleInputChange}
-          placeholder={`Message #${chatName} (try @RailaAI)`}
+          placeholder={`Message #${chatName} — try /trip, /homework, or @RailaAI`}
           onClick={() => setShowPicker(false)}
         />
-        <button type="submit" disabled={!formValue.trim()}>
+        <button type="submit" disabled={!formValue.trim() && !uploading}>
           Send
         </button>
       </form>
