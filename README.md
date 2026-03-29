@@ -4,13 +4,6 @@ Realtime chat platform built with React, Firebase, and Google Gemini. Features i
 
 This repository assumes the documented production setup: Firebase Auth + Firestore + Cloud Functions, with Blaze enabled for AI, invite management, and file uploads. Spark can be used only for ad hoc local experiments; tracked app code does not auto-approve users or bypass the invite/admin model.
 
-## Live Demo
-
-[Add link here]
-
-## Screenshots
-
-[Add 3-5 screenshots or GIFs here]
 
 - Sign-in → invite gate flow
 - Main chat room with AI summary panel and reactions
