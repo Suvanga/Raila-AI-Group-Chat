@@ -48,18 +48,21 @@ export function usePresence() {
 
     goOnline();
 
-    window.addEventListener('beforeunload', goOffline);
-    document.addEventListener('visibilitychange', () => {
+    const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         goOffline();
       } else {
         goOnline();
       }
-    });
+    };
+
+    window.addEventListener('beforeunload', goOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       goOffline();
       window.removeEventListener('beforeunload', goOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 }
@@ -82,13 +85,21 @@ export function useUserPresence(uid) {
   return presence;
 }
 
+// Resolve the typing collection path for any chat
+function getTypingCollectionPath(chatId) {
+  return chatId === 'public'
+    ? 'typing'
+    : `chats/${chatId}/typing`;
+}
+
 // Set typing indicator for the current user in a chat
 export function useTypingIndicator(chatId) {
   const setTyping = (isTyping) => {
     const user = auth.currentUser;
     if (!user || !chatId) return;
 
-    const typingRef = doc(db, `chats/${chatId}/typing`, user.uid);
+    const typingPath = getTypingCollectionPath(chatId);
+    const typingRef = doc(db, typingPath, user.uid);
 
     if (isTyping) {
       setDoc(typingRef, {
@@ -108,12 +119,13 @@ export function useTypingUsers(chatId) {
   const [typingUsers, setTypingUsers] = useState([]);
 
   useEffect(() => {
-    if (!chatId || chatId === 'public') {
+    if (!chatId) {
       setTypingUsers([]);
       return;
     }
 
-    const typingRef = collection(db, `chats/${chatId}/typing`);
+    const typingPath = getTypingCollectionPath(chatId);
+    const typingRef = collection(db, typingPath);
     const q = query(typingRef);
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
